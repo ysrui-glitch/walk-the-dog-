@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { HEIGHT, WIDTH } from './config';
+import { AlbumScene } from './scenes/AlbumScene';
 import { BootScene } from './scenes/BootScene';
 import { ChaseScene } from './scenes/ChaseScene';
 import { EndScene } from './scenes/EndScene';
@@ -12,7 +13,7 @@ const game = new Phaser.Game({
   height: HEIGHT,
   backgroundColor: '#2d4a2b',
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [BootScene, TitleScene, ChaseScene, EndScene],
+  scene: [BootScene, TitleScene, ChaseScene, EndScene, AlbumScene],
 });
 
 if (import.meta.env.DEV) Object.assign(window, { game });

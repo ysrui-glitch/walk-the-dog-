@@ -5,22 +5,31 @@ import { BIOMES, biomeAt, biomeStart, pickStart, skinFor } from './biomes';
 describe('biomes', () => {
   it('goes further afield the longer you chase, then loops back home', () => {
     const order: string[] = [];
-    for (let m = 0; m < 2100; m += 10) if (order.at(-1) !== biomeAt(m).id) order.push(biomeAt(m).id);
+    for (let m = 0; m < 3300; m += 10) if (order.at(-1) !== biomeAt(m).id) order.push(biomeAt(m).id);
     expect(order).toEqual(['city', 'park', 'beach', 'sea', 'snow', 'desert', 'prehistoric', 'space', 'city']);
   });
 
   it('has drawn art for every skin and decoration in every biome', () => {
     for (const biome of BIOMES) {
       for (const options of Object.values(biome.skins)) for (const key of options ?? []) expect(ART[key], key).toBeDefined();
-      const own = [...Object.values(biome.rides ?? {}).map((r) => r.key), ...Object.values(biome.tosses ?? {}).map((t) => t.key), ...(biome.shield ? [biome.shield.key] : []), ...(biome.ground?.overlays ?? [])];
+      const rules = biome.rules ?? {};
+      const ruleArt = [rules.chaser?.art, rules.roller?.art, rules.boost?.art, rules.stray?.art].filter((k) => k !== undefined);
+      const own = [...ruleArt, ...Object.values(biome.rides ?? {}).map((r) => r.key), ...Object.values(biome.tosses ?? {}).map((t) => t.key), ...(biome.shield ? [biome.shield.key] : []), ...(biome.ground?.overlays ?? [])];
       for (const key of [...biome.decor, biome.perch, ...own]) expect(ART[key], key).toBeDefined();
       if (biome.skins.critter) for (const key of biome.skins.critter) expect(ART[key.replace(/-0$/, '-1')], key).toBeDefined();
     }
   });
 
   it('gives each biome its own critter for the dog to chase', () => {
-    expect(skinFor(biomeAt(300), 'critter', () => 0)).toBe('squirrel-0');
-    expect(skinFor(biomeAt(500), 'critter', () => 0)).toBe('gull-0');
+    expect(skinFor(biomeAt(biomeStart('park')! + 10), 'critter', () => 0)).toBe('squirrel-0');
+    expect(skinFor(biomeAt(biomeStart('beach')! + 10), 'critter', () => 0)).toBe('gull-0');
+  });
+
+  it('gives every world a threat of its own', () => {
+    for (const biome of BIOMES) {
+      const r = biome.rules ?? {};
+      expect([r.chaser, r.roller, r.stray, r.holes, r.tide].some(Boolean), biome.id).toBe(true);
+    }
   });
 
   it('knows where each world starts, for jumping straight there when testing', () => {

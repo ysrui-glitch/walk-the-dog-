@@ -13,5 +13,7 @@ export const SEA_ART: Readonly<Record<string, Art>> = {
   'ride-speedboat': sticker(96, 50, `${hull('M-44,0 L40,0 Q46,2 40,12 L-38,14 Q-44,10 -44,0 Z', '#ffffff')}<path d="M-40,7 L42,6" ${line('#3d8bfd', 3.4)}/><path d="M-6,0 L2,-16 L22,-16 L28,0 Z" ${paint('#cfe9ff', 2)}/><circle cx="12" cy="-10" r="6" ${paint('#ffd3ab', 1.8)}/><path d="M6,-11 A6,6 0 0 1 18,-11 Q12,-15 6,-11 Z" fill="#5a3a22"/>${dot(14, -10, 1)}${splash(-46, 10)}${splash(-50, 4)}`),
   'shield-ring': sticker(46, 26, `<ellipse cx="0" cy="0" rx="19" ry="8" ${paint('#ffffff', 2.6)}/><path d="M-12,-6 L-8,6 M8,-6 L12,6 M-19,0 L-15,0 M15,0 L19,0" ${line('#e53935', 5)}/><ellipse cx="0" cy="0" rx="10" ry="3.5" fill="#2f9fd8" stroke="${INK}" stroke-width="2"/>`),
   'fx-wave': sticker(46, 16, `<path d="M-18,4 Q-12,-6 -4,2 Q2,-6 10,2 Q14,-4 18,2" ${line('#ffffff', 3)}/>`, 0.1),
+  // A shark hunting you from behind: only the fin shows above the water, cutting a wake.
+  'fx-fin': sticker(44, 40, `<path d="M-18,12 Q-10,6 -2,12 Q6,6 14,12" ${line('#ffffff', 2.6)}/><path d="M-12,10 Q-4,-6 6,-16 Q8,-4 14,10 Z" ${paint('#6c8fb3')}/><path d="M2,-8 Q4,0 9,8" ${line('#56789c', 2)}/>`),
   'fx-sparkle': sticker(16, 16, `<path d="M0,-6 L1.6,-1.6 L6,0 L1.6,1.6 L0,6 L-1.6,1.6 L-6,0 L-1.6,-1.6 Z" fill="#ffffff"/>`, 0.1),
 };

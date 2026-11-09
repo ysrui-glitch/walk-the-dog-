@@ -3,6 +3,7 @@ import { ART_SCALE, BREEDS, type BreedId } from '../art';
 import { HEIGHT, WIDTH } from '../config';
 import { loadBest } from '../logic/best';
 import { loadBreed, saveBreed } from '../logic/prefs';
+import { STICKERS, loadStickers } from '../logic/stickers';
 
 const HOW_TO = [
   '狗突然狂奔了！你是主人，快追！',
@@ -42,12 +43,22 @@ export class TitleScene extends Phaser.Scene {
     const start = this.add.text(WIDTH / 2, 575, '点击开始', { fontSize: '28px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setStroke('#2e5d27', 6);
     this.tweens.add({ targets: start, alpha: 0.3, yoyo: true, repeat: -1, duration: 600 });
 
+    this.albumButton();
+
     const go = () => this.scene.start('game');
     // A tap on a breed picks the dog; a tap anywhere else starts the chase.
     this.input.on('pointerup', (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
       if (over.length === 0) go();
     });
     this.input.keyboard?.once('keydown-SPACE', go);
+  }
+
+  // The sticker album, top right, with how many you have.
+  private albumButton(): void {
+    const label = `贴纸册 ${loadStickers().size}/${STICKERS.length}`;
+    const button = this.add.rectangle(WIDTH - 66, 30, 116, 34, 0xffd54f, 0.95).setStrokeStyle(3, 0x2e5d27).setInteractive({ useHandCursor: true });
+    this.add.text(WIDTH - 66, 30, label, { fontSize: '15px', color: '#2b2118', fontStyle: 'bold' }).setOrigin(0.5);
+    button.on('pointerup', () => this.scene.start('album'));
   }
 
   // A row of dog portraits under the picture; the chosen one sits on a highlighted tile and is remembered.

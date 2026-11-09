@@ -35,7 +35,7 @@ export class EntityView {
     const marks: Mark[] = [];
     const local =
       e.kind === 'ride' ? biome.rides?.[e.tag as RideKind]?.key : e.kind === 'shield' ? biome.shield?.key : e.kind === 'toss' ? biome.tosses?.[e.tag as TossKind]?.key : undefined;
-    let key = local ?? chaseArt(e.kind, e.tag) ?? skinFor(biome, e.kind, Math.random);
+    let key = e.skin ?? (local ?? chaseArt(e.kind, e.tag) ?? skinFor(biome, e.kind, Math.random));
     if (this.isOwnDog(key)) key = (biome.skins[e.kind] ?? []).find((k) => !this.isOwnDog(k)) ?? key;
     const sprite = this.scene.add.image(x, e.y, key).setScale(ART_SCALE * (e.kind === 'ride' ? RIDE_SCALE : 1));
     sprite.setDepth(e.kind === 'puddle' ? 2 : 4);
@@ -48,6 +48,8 @@ export class EntityView {
       add(this.scene.add.circle(x, e.y, 18, 0xffeb3b, 0.4).setStrokeStyle(2, 0xffc107).setDepth(3), 0, true);
     } else if (e.kind === 'shield') {
       add(this.scene.add.circle(x, e.y, 24, 0xff80ab, 0.35).setStrokeStyle(2, 0xff4081).setDepth(3), 0, true);
+    } else if (e.kind === 'boost') {
+      add(this.scene.add.circle(x, e.y, 26, 0x7cf3ff, 0.35).setStrokeStyle(3, 0x00e5ff).setDepth(3), 0, true);
     } else if (e.kind === 'poop') {
       add(this.scene.add.circle(x, e.y, 20, 0xa5d6a7, 0.4).setStrokeStyle(2, 0x66bb6a).setDepth(3), 0, true);
     }
@@ -75,6 +77,8 @@ export class EntityView {
     if (!sprite) return;
     const x = xOf(e);
     sprite.setPosition(x, e.y);
+    // A giant snowball grows and spins as it rolls closer.
+    if (e.grows) sprite.setScale(ART_SCALE * (0.7 + 0.65 * Phaser.Math.Clamp((e.y + 60) / 620, 0, 1))).setAngle(-e.y * 0.9);
     if (isGood(e.kind)) sprite.setScale(ART_SCALE * (e.kind === 'ride' ? RIDE_SCALE : 1) * (1 + 0.06 * Math.sin(now / 140 + e.id)));
     for (const { obj, dy, pulse } of this.marks.get(e.id) ?? []) {
       obj.setPosition(x, e.y + dy);

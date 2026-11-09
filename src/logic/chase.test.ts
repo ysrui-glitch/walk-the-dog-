@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SHIELD_UNLOCK_M, CATCH_GAP, LOST_GAP, MAX_PULL_PX_S, RIDES, RIDE_TOP_UP_MS, SLIP_MS, dogBaseSpeed, mountRide, nextSlip, dogPace, nextGap, ownerSpeed, pickRide, planChaseRow, settleMood } from './chase';
+import { RIDE_PERKS, hasPerk, newPerk, SHIELD_UNLOCK_M, CATCH_GAP, LOST_GAP, MAX_PULL_PX_S, RIDES, RIDE_TOP_UP_MS, SLIP_MS, dogBaseSpeed, mountRide, nextSlip, dogPace, nextGap, ownerSpeed, pickRide, planChaseRow, settleMood } from './chase';
 import { isObstacle } from './world';
 
 function seeded(seed: number): () => number {
@@ -14,17 +14,28 @@ describe('the chase', () => {
     expect(mountRide({ kind: 'moto', until: 6000 }, 'scooter', 2000).until).toBeLessThanOrEqual(2000 + RIDES.moto.ms);
   });
 
+  it('gives each star a new perk, and keeps every perk of the rides below', () => {
+    const ladder = ['skate', 'scooter', 'cycle', 'moto', 'car'] as const;
+    expect(ladder.map(newPerk)).toEqual(['hop', 'bell', 'basket', 'bump', 'smash']);
+    for (const [i, ride] of ladder.entries()) for (const lower of ladder.slice(0, i + 1)) expect(hasPerk(ride, newPerk(lower)), `${ride} ${lower}`).toBe(true);
+    expect(hasPerk('scooter', 'basket')).toBe(false);
+    expect(hasPerk(undefined, 'hop')).toBe(false);
+    for (const perk of Object.values(RIDE_PERKS)) expect(perk.line.length).toBeGreaterThan(0);
+  });
+
   it('each better ride is clearly faster than the one before', () => {
     const ladder = (['skate', 'scooter', 'cycle', 'moto', 'car'] as const).map((k) => RIDES[k].ratio);
     for (let i = 1; i < ladder.length; i++) expect(ladder[i] - ladder[i - 1]).toBeGreaterThan(0.14);
   });
 
-  it('spreads rides out: none right after one, always one after a long drought', () => {
+  it('spreads rides out in time: none right after one, always one after a long drought, both longer later on', () => {
     const random = seeded(5);
+    const ride = (seconds: number, sinceRide: number) => planChaseRow(random, 500, seconds, sinceRide).some((s) => s.kind === 'ride');
     for (let i = 0; i < 200; i++) {
-      expect(planChaseRow(random, 500, 60, 1).some((s) => s.kind === 'ride')).toBe(false);
-      expect(planChaseRow(random, 500, 0, 8).some((s) => s.kind === 'ride')).toBe(true);
-      expect(planChaseRow(random, 500, 200, 18).some((s) => s.kind === 'ride')).toBe(true);
+      expect(ride(0, 0.5)).toBe(false);
+      expect(ride(0, 5)).toBe(true);
+      expect(ride(180, 4)).toBe(false);
+      expect(ride(180, 20)).toBe(true);
     }
   });
 

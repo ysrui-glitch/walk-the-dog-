@@ -16,10 +16,8 @@ export interface RideSpec {
   readonly ms: number;
   readonly unlock: number;
   readonly weight: number;
-  // How fast it feels, shown as stars when you grab it.
+  // How fast it feels, shown as stars when you grab it. Each star also adds a perk (see RIDE_PERKS).
   readonly tier: number;
-  // A car ploughs straight through obstacles.
-  readonly smashes?: boolean;
 }
 
 export const RIDES: Readonly<Record<RideKind, RideSpec>> = {
@@ -27,8 +25,30 @@ export const RIDES: Readonly<Record<RideKind, RideSpec>> = {
   scooter: { name: '滑板车', ratio: 1.25, ms: 6000, unlock: 60, weight: 4, tier: 2 },
   cycle: { name: '自行车', ratio: 1.42, ms: 5500, unlock: 180, weight: 3, tier: 3 },
   moto: { name: '电动车', ratio: 1.62, ms: 5000, unlock: 300, weight: 2, tier: 4 },
-  car: { name: '汽车', ratio: 1.9, ms: 4500, unlock: 450, weight: 1, tier: 5, smashes: true },
+  car: { name: '汽车', ratio: 1.9, ms: 4500, unlock: 450, weight: 1, tier: 5 },
 };
+
+// What each star adds on top of the speed, and a ride keeps every perk below its own: a skateboard hops puddles, a
+// scooter's bell makes crossers wait, a bike's basket scoops up things in the next lane, a motorbike knocks small
+// obstacles flying, and a car smashes through everything.
+export type RidePerk = 'hop' | 'bell' | 'basket' | 'bump' | 'smash';
+
+export const RIDE_PERKS: Readonly<Record<RidePerk, { readonly tier: number; readonly line: string }>> = {
+  hop: { tier: 1, line: '跳过水坑' },
+  bell: { tier: 2, line: '按铃让路' },
+  basket: { tier: 3, line: '旁边道的东西也能捡' },
+  bump: { tier: 4, line: '撞开小障碍' },
+  smash: { tier: 5, line: '撞飞所有障碍' },
+};
+
+export function hasPerk(ride: RideKind | undefined, perk: RidePerk): boolean {
+  return ride !== undefined && RIDES[ride].tier >= RIDE_PERKS[perk].tier;
+}
+
+// The perk a ride brings that the rides below it don't.
+export function newPerk(ride: RideKind): RidePerk {
+  return (Object.keys(RIDE_PERKS) as RidePerk[]).find((perk) => RIDE_PERKS[perk].tier === RIDES[ride].tier)!;
+}
 
 export interface Ride {
   readonly kind: RideKind;
@@ -55,7 +75,9 @@ export type DogMood =
   | { readonly kind: 'stop'; readonly until: number }
   | { readonly kind: 'back'; readonly until: number }
   | { readonly kind: 'slow'; readonly until: number }
-  | { readonly kind: 'sprint'; readonly until: number };
+  | { readonly kind: 'sprint'; readonly until: number }
+  // Skidding and spinning on ice, sliding back towards the owner.
+  | { readonly kind: 'skid'; readonly until: number };
 
 export interface TossSpec {
   readonly name: string;
@@ -87,7 +109,7 @@ export const TREE_BARK_MS = 1300;
 export const POOP_EVERY_MS = [12000, 20000] as const;
 export const POOP_MS = 1600;
 
-const MOOD_PACE = { run: 1, stop: 0, back: -0.6, slow: 0.45, sprint: 1.5 } as const;
+const MOOD_PACE = { run: 1, stop: 0, back: -0.6, slow: 0.45, sprint: 1.5, skid: -0.5 } as const;
 
 export function settleMood(mood: DogMood, now: number): DogMood {
   return mood.kind !== 'run' && now >= mood.until ? { kind: 'run' } : mood;
@@ -99,7 +121,7 @@ export function dogPace(mood: DogMood): number {
 
 const DOG_START_SPEED = 240;
 const DOG_GAIN_PER_S = 2.8;
-const DOG_MAX_SPEED = 580;
+const DOG_MAX_SPEED = 495;
 
 export function dogBaseSpeed(seconds: number): number {
   return Math.min(DOG_MAX_SPEED, DOG_START_SPEED + DOG_GAIN_PER_S * seconds);
@@ -111,7 +133,7 @@ export function footRatio(seconds: number): number {
 }
 
 const STUNNED_RATIO = 0.25;
-export const MAX_SCROLL_SPEED = 780;
+export const MAX_SCROLL_SPEED = 665;
 
 export function ownerSpeed(dogBase: number, ride: RideKind | undefined, stunned: boolean, seconds: number): number {
   const ratio = stunned ? STUNNED_RATIO : ride ? RIDES[ride].ratio : footRatio(seconds);
@@ -159,10 +181,11 @@ export function pickToss(random: () => number, meters: number): TossKind {
   return weighted(random, TOSSES, meters);
 }
 
-// The texture a pickup is drawn with: rides and throwables look the same in every biome.
+// The texture a pickup is drawn with: rides and throwables look the same in every biome; a boost names its own art.
 export function chaseArt(kind: EntityKind, tag: string | undefined): string | undefined {
   if (kind === 'ride' || kind === 'toss') return `${kind}-${tag}`;
   if (kind === 'shield') return 'ride-balloon';
+  if (kind === 'boost') return tag;
   if (kind === 'puddle' && tag) return `pud-${tag}`;
   return undefined;
 }
@@ -179,11 +202,12 @@ const OBSTACLE_MAX = 0.6;
 const RIDE_CHANCE_START = 0.16;
 const RIDE_CHANCE_MIN = 0.08;
 const RIDE_THINNING_S = 1500;
-// Rides are spread out: never two rows running, and never more than this many rows without one.
-const RIDE_GAP_ROWS = 2;
-const RIDE_DROUGHT_ROWS = 8;
-// Rows fly by faster as the chase speeds up, so the guarantee stretches with time to stay a rescue, not a supply.
-const DROUGHT_STRETCH_S = 20;
+// Rides are spread out in time, not in rows (rows fly by faster as the chase speeds up): a while at least between two,
+// and never longer than the drought without one. Both stretch as the chase goes on, so a run always ends.
+const RIDE_GAP_S = 1;
+const GAP_STRETCH = 1 / 45;
+const RIDE_DROUGHT_S = 4;
+const DROUGHT_STRETCH = 1 / 18;
 const TOSS_CHANCE = 0.11;
 const MAX_EXTRAS = 2;
 // Late in the chase there is more to distract the dog and less to throw at it.
@@ -192,9 +216,9 @@ const CRITTER_GAIN_PER_S = 0.0004;
 const TOSS_THINNING_S = 3000;
 const BUDDY_CHANCE = 0.07;
 
-function rideChance(seconds: number, rowsSinceRide: number): number {
-  if (rowsSinceRide < RIDE_GAP_ROWS) return 0;
-  if (rowsSinceRide >= RIDE_DROUGHT_ROWS + Math.floor(seconds / DROUGHT_STRETCH_S)) return 1;
+function rideChance(seconds: number, sinceRide: number): number {
+  if (sinceRide < RIDE_GAP_S + seconds * GAP_STRETCH) return 0;
+  if (sinceRide >= RIDE_DROUGHT_S + seconds * DROUGHT_STRETCH) return 1;
   return Math.max(RIDE_CHANCE_MIN, RIDE_CHANCE_START - seconds / RIDE_THINNING_S);
 }
 
@@ -204,7 +228,8 @@ function obstacleKind(random: () => number, meters: number): EntityKind {
 }
 
 // One row of road: at most two obstacles so a lane always stays open, then at most two pickups or dog baits.
-export function planChaseRow(random: () => number, meters: number, seconds: number, rowsSinceRide: number): ChaseSpec[] {
+// `sinceRide`: seconds since the last ride was laid out.
+export function planChaseRow(random: () => number, meters: number, seconds: number, sinceRide: number): ChaseSpec[] {
   const lanes = [...LANES].sort(() => random() - 0.5);
   const row: ChaseSpec[] = [];
   const obstacleChance = Math.min(OBSTACLE_MAX, OBSTACLE_START + seconds / 400);
@@ -212,7 +237,7 @@ export function planChaseRow(random: () => number, meters: number, seconds: numb
   if (random() < obstacleChance / 3) row.push({ kind: 'pole', lane: lanes.pop()! });
   const obstacles = row.length;
   const extras: [number, EntityKind, (() => string) | undefined][] = [
-    [rideChance(seconds, rowsSinceRide), 'ride', () => pickRide(random, meters)],
+    [rideChance(seconds, sinceRide), 'ride', () => pickRide(random, meters)],
     [Math.max(TOSS_CHANCE / 2, TOSS_CHANCE - seconds / TOSS_THINNING_S), 'toss', () => pickToss(random, meters)],
     [meters >= SHIELD_UNLOCK_M ? SHIELD_CHANCE : 0, 'shield', undefined],
     [meters >= 40 ? CRITTER_CHANCE + CRITTER_GAIN_PER_S * seconds : 0, 'critter', undefined],

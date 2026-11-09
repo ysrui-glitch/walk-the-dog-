@@ -14,7 +14,9 @@ export type EntityKind =
   | 'critter'
   | 'buddy'
   // Left behind by the dog, for the owner to pick up.
-  | 'poop';
+  | 'poop'
+  // Grab it and it shoots you forward: a pterodactyl, a boost ring.
+  | 'boost';
 
 export interface Entity {
   readonly id: number;
@@ -23,15 +25,24 @@ export interface Entity {
   lane: Lane;
   x?: number;
   vx?: number;
+  // Something rolling down the road at you (a giant snowball) moves faster than the road scrolls.
+  vy?: number;
+  // Drawn with this texture instead of the world's usual one for its kind.
+  readonly skin?: string;
+  // Grows as it comes (a giant snowball), or weaves across the lanes around this x (a tornado).
+  readonly grows?: boolean;
+  readonly swayFrom?: number;
   // Which ride or throwable a pickup holds.
   readonly tag?: string;
   y: number;
   consumed: boolean;
   ignoredByDog: boolean;
+  // The owner has already got past it harmlessly (hopped a puddle, a crosser waited), so it can't hit them now.
+  passed?: boolean;
 }
 
 const OBSTACLES: ReadonlySet<EntityKind> = new Set(['pole', 'barrier', 'crosser']);
-const GOOD: ReadonlySet<EntityKind> = new Set(['ride', 'toss', 'shield', 'poop']);
+const GOOD: ReadonlySet<EntityKind> = new Set(['ride', 'toss', 'shield', 'poop', 'boost']);
 
 export function xOf(e: Entity): number {
   return e.x ?? LANE_X[e.lane];
