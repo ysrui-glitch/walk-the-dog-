@@ -75,8 +75,11 @@ export const BIOMES: readonly Biome[] = [
     skins: { ...CITY_SKINS, pole: ['ob-tree', 'ob-pine', 'ob-rock'], crosser: ['cross-duck'], barrier: ['bar-log'], puddle: ['pud-mud'], critter: ['squirrel-0'] },
     decor: ['dec-flower', 'dec-mushroom', 'dec-tree', 'dec-butterfly'],
     perch: 'ob-tree',
-    intro: '野狗会来撩你的狗，扔东西引开它！\n走路上草坡能滑得飞快',
-    rules: { zone: { kind: 'slope', rows: 3, every: [8, 12] }, stray: { art: 'buddy-poodle' } },
+    intro: '割草机会开过来，快躲！\n野狗会来撩狗，扔东西引开它',
+    rules: {
+      stray: { art: 'buddy-poodle' },
+      roller: { art: 'ob-mower', every: [4000, 6500], first: 5000, pxS: 230, warn: '割草机开过来了！快躲开', hit: '被割草机撞倒了！' },
+    },
   },
   {
     id: 'beach',
@@ -126,9 +129,9 @@ export const BIOMES: readonly Biome[] = [
     skins: { ...CITY_SKINS, pole: ['ob-snowman', 'ob-snowpine', 'ob-iceblock'], crosser: ['cross-penguin'], barrier: ['bar-snowdrift'], puddle: ['pud-ice'], critter: ['rabbit-0'] },
     decor: ['dec-igloo', 'dec-mitten', 'dec-snowball'],
     perch: 'ob-snowpine',
-    intro: '大雪球会滚下来，快躲！\n狗在冰上会滑倒，快追',
+    intro: '大雪球会滚下来，快躲！\n雪橇犬会从后面冲上来，红道闪了就让开',
     rules: {
-      zone: { kind: 'ice', rows: 4, every: [10, 15] },
+      charger: { art: 'ob-huskysled', name: '雪橇犬', from: 'behind' },
       roller: { art: 'ob-giantsnowball', every: [3500, 5500], first: 5000, pxS: 200, grows: true, owed: 'ball', warn: '大雪球滚下来了！\n躲开，或者扔雪球砸碎它', hit: '被大雪球撞飞了！' },
     },
     rides: {
@@ -179,10 +182,10 @@ export const BIOMES: readonly Biome[] = [
     skins: { ...CITY_SKINS, pole: ['ob-fern', 'ob-volcanorock'], crosser: ['cross-trex'], barrier: ['bar-fallentrunk'], puddle: ['pud-tar'], critter: ['raptor-0'] },
     decor: ['dec-volcano', 'dec-egg', 'dec-pterodactyl', 'dec-ammonite'],
     perch: 'ob-fern',
-    intro: '霸王龙会从后面扑你！\n抓住翼龙就能飞过去',
+    intro: '霸王龙会从后面扑你！\n翼龙会从前面俯冲下来，红道闪了就让开',
     rules: {
       chaser: { art: 'fx-trexhead', name: '霸王龙', feed: 'bone', stomps: true },
-      boost: { art: 'dec-pterodactyl', chance: 0.04, ms: 2500, factor: 1.6, lifts: true, line: '翼龙把你叼起来飞！' },
+      charger: { art: 'dec-pterodactyl', name: '翼龙', from: 'ahead' },
     },
     rides: {
       skate: { key: 'ride-stonewheel', name: '石头轮' },
@@ -208,8 +211,11 @@ export const BIOMES: readonly Biome[] = [
     skins: { ...CITY_SKINS, pole: ['ob-asteroid', 'ob-satellite', 'ob-crystal'], crosser: ['cross-ufo'], barrier: ['bar-laser'], puddle: ['pud-slime'], critter: ['alien-0'], buddy: [] },
     decor: ['dec-planet', 'dec-rocket', 'dec-comet', 'dec-astronaut'],
     perch: 'ob-satellite',
-    intro: '黑洞会把你吸过去，往外划！\n穿过加速环能加速',
-    rules: { holes: true, boost: { art: 'fx-boostring', chance: 0.08, ms: 1800, factor: 1.5, line: '穿过加速环！' } },
+    intro: '黑洞会把你吸过去，往外划！\n陨石会砸下来，快躲',
+    rules: {
+      holes: true,
+      roller: { art: 'ob-meteor', every: [5000, 7500], first: 5000, pxS: 260, warn: '陨石砸下来了！快躲开', hit: '被陨石砸中了！' },
+    },
     helmet: true,
     rides: {
       skate: { key: 'ride-hoverboard', name: '悬浮板' },

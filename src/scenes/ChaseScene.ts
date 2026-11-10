@@ -23,12 +23,14 @@ import {
   dogPace,
   hasPerk,
   mountRide,
+  nextPoopRide,
   newPerk,
   nextSlip,
   nextGap,
   ownerSpeed,
   pickToss,
   planChaseRow,
+  rideOpen,
   settleMood,
   type DogMood,
   type Ride,
@@ -37,7 +39,7 @@ import {
   type Slip,
   type TossKind,
 } from '../logic/chase';
-import { DOG_SKID_MS, PESTER_MS, RED_WAIT_MS, SURF_MS, TOW_RATIO, swayX } from '../logic/hazards';
+import { PESTER_MS, RED_WAIT_MS, SURF_MS, swayX } from '../logic/hazards';
 import { endGesture, moveGesture, startGesture, type Gesture, type GestureAction } from '../logic/gesture';
 import { isObstacle, laneAt, xOf, type Entity, type EntityKind } from '../logic/world';
 import { sfx } from '../sfx';
@@ -91,9 +93,8 @@ const LEASH_SLACK = Phaser.Display.Color.ValueToColor(0x8d6e63);
 const LEASH_MID = Phaser.Display.Color.ValueToColor(0xffa000);
 const LEASH_TAUT = Phaser.Display.Color.ValueToColor(0xe53935);
 const SLIPPERY: ReadonlySet<EntityKind> = new Set(['puddle']);
-// Arriving in a world runs the chase at this speed for INTRO_MS of real time, so its rules can be read.
-const INTRO_SLOWDOWN = 0.3;
-const INTRO_MS = 1500;
+// How long a new world's banner stays up.
+const INTRO_MS = 2300;
 // A snowball or coconut knocks over the first obstacle this far ahead in your lane.
 const SMASH_REACH_PX = 380;
 
@@ -127,6 +128,8 @@ export class ChaseScene extends Phaser.Scene {
   private nextCatchAt = 0;
   private smashed = 0;
   private lastRideAt = 0;
+  // The ride a poop just opened, owed as the next ride on the road.
+  private promisedRide: RideKind | undefined;
   private nextPoopAt = 0;
   private poopsPicked = 0;
   private poopsTotal = 0;
@@ -137,8 +140,6 @@ export class ChaseScene extends Phaser.Scene {
   private nextSampleAt = 0;
   private best = 0;
   private stickers: ReadonlySet<string> = new Set();
-  // Real milliseconds of slow motion left, while a new world's rules are shown.
-  private slowLeft = 0;
   private newStickers = 0;
 
   private scenery!: Scenery;
@@ -194,6 +195,7 @@ export class ChaseScene extends Phaser.Scene {
       nextCatchAt: 0,
       smashed: 0,
       lastRideAt: 0,
+      promisedRide: undefined,
       nextPoopAt: Phaser.Math.Between(...POOP_EVERY_MS),
       poopsPicked: 0,
       poopsTotal: 0,
@@ -203,7 +205,6 @@ export class ChaseScene extends Phaser.Scene {
       best: loadBest(),
       stickers: loadStickers(),
       newStickers: 0,
-      slowLeft: 0,
     });
     track('run_start', { run: this.run, mode: 'drag', variant: 'chase', touch: matchMedia('(pointer: coarse)').matches, start });
 
@@ -261,10 +262,8 @@ export class ChaseScene extends Phaser.Scene {
     track('move', { run: this.run, t: this.elapsed });
   }
 
-  update(_time: number, realMs: number): void {
+  update(_time: number, deltaMs: number): void {
     if (this.ended) return;
-    const deltaMs = this.slowLeft > 0 ? realMs * INTRO_SLOWDOWN : realMs;
-    this.slowLeft -= realMs;
     const dt = Math.min(deltaMs, 50) / 1000;
     this.elapsed += deltaMs;
     const seconds = this.elapsed / 1000;
@@ -273,9 +272,7 @@ export class ChaseScene extends Phaser.Scene {
 
     const dogBase = dogBaseSpeed(seconds);
     const dogV = dogBase * dogPace(this.mood);
-    const ownV = ownerSpeed(dogBase, this.ride?.kind, this.isStunned(), seconds) * this.hazards.speedFactor(this.elapsed, this.ownerLane, !this.ride);
-    // On the ice the dog tows you: it can't pull away while you slide along behind it.
-    const ownerV = this.hazards.towing() && !this.isStunned() ? Math.max(ownV, dogV * TOW_RATIO) : ownV;
+    const ownerV = ownerSpeed(dogBase, this.ride?.kind, this.isStunned(), seconds) * this.hazards.speedFactor(this.elapsed, this.ownerLane, !this.ride);
     this.gap = nextGap(this.gap, dogV, ownerV, dt);
     if (this.gap <= CATCH_GAP) this.closeCall();
 
@@ -337,11 +334,11 @@ export class ChaseScene extends Phaser.Scene {
     track('tick', { run: this.run, t: this.elapsed, gap: Math.round(this.gap), ride: this.ride?.kind ?? null, mood: this.mood.kind, stunned: this.isStunned() });
   }
 
-  // This world's own rules: threats crash into you like obstacles, zones and boosts change the dog's pace or yours.
+  // This world's own rules: threats crash into you like obstacles; waves and zones change your pace or the dog's.
   private worldRules(dt: number, dy: number): void {
     const rideTier = this.ride ? RIDES[this.ride.kind].tier : 0;
     const progress = biomeProgress(this.meters + this.routeOffset);
-    const tick = { now: this.elapsed, dt, dy, ownerLane: this.ownerLane, rideTier, dogX: this.dogX, dogY: this.dogY(), progress };
+    const tick = { now: this.elapsed, dt, dy, ownerLane: this.ownerLane, rideTier, dogX: this.dogX, dogY: this.dogY(), progress, dogBusy: this.dogDistracted() };
     for (const event of this.hazards.update(tick)) {
       track('hazard', { run: this.run, t: this.elapsed, what: event, ride: this.ride?.kind ?? null, gap: Math.round(this.gap) });
       this.onHazard(event);
@@ -360,16 +357,13 @@ export class ChaseScene extends Phaser.Scene {
     else if (event === 'roller') this.roll();
     else if (event === 'miss' || event === 'outrun' || event === 'hole_passed') this.earn(event);
     else if (event === 'rise' && this.hazards.flooded() === 3) this.earn('tide_full');
-    else if (event === 'zone' && this.hazards.zoneHere() === 'ice') this.earn('tow');
-    else if (event === 'zone' && this.hazards.zoneHere() === 'slope' && !this.ride) this.earn('slope');
     else if (event === 'pester') {
       this.catChase.escape();
       this.setMood({ kind: 'sprint', until: this.elapsed + PESTER_MS }, 'fx-dash', '被野狗撩得一起狂奔！', '#ff8a80', 'run');
-    } else if (event === 'skid' && free) {
-      this.catChase.escape();
-      this.setMood({ kind: 'skid', until: this.elapsed + DOG_SKID_MS }, 'fx-alert', '狗狗在冰上滑倒了！', '#b3e5fc', 'skid');
-      this.reportGain(DOG_SKID_MS, '狗滑倒，追近了');
-      this.earn('skid');
+    } else if (event === 'charge_hit') {
+      this.crash('charger', `被${this.hazards.chargerName()}撞倒了！`);
+    } else if (event === 'charge_miss') {
+      this.earn('dodge_charge');
     } else if (event === 'red' && free) {
       this.catChase.escape();
       this.setMood({ kind: 'stop', until: this.elapsed + RED_WAIT_MS }, 'fx-alert', '红灯！狗狗乖乖停下等', '#ff8a80', 'stand');
@@ -386,21 +380,6 @@ export class ChaseScene extends Phaser.Scene {
     const e: Entity = { id: this.nextId++, kind: 'pole', tag: 'roller', skin: rule.art, grows: rule.grows, swayFrom: rule.sways ? LANE_X[lane] : undefined, lane, y: -60, vy: rule.pxS, consumed: false, ignoredByDog: true };
     this.entities.push(e);
     this.view.create(e, this.biome);
-  }
-
-  // A pterodactyl lifts you over everything; a boost ring shoots you forward.
-  private grabBoost(e: Entity): void {
-    const rule = this.biome.rules?.boost;
-    this.consume(e);
-    if (!rule) return;
-    this.hazards.boost(this.elapsed, rule.ms, rule.factor, rule.lifts);
-    if (rule.lifts) this.invulnerableUntil = Math.max(this.invulnerableUntil, this.elapsed + rule.ms);
-    this.popText(this.ownerX, OWNER_Y - 60, rule.line, '#7cf3ff');
-    this.reportGain(rule.ms, '追近了');
-    this.cameras.main.flash(100, 150, 240, 255);
-    sfx.charged();
-    track('boost', { run: this.run, t: this.elapsed, kind: e.tag ?? null });
-    this.earn(rule.lifts ? 'lift' : 'ring');
   }
 
   // On a ride you surf the wave and shoot forward; on foot it knocks you over.
@@ -435,6 +414,13 @@ export class ChaseScene extends Phaser.Scene {
     }
   }
 
+  // Something already has the dog's attention: a cat it is chasing, a cat, gull or other dog on the road, a stray, or
+  // it is still bolting after one. While it does, nothing else for the dog turns up.
+  private dogDistracted(): boolean {
+    const bait = this.entities.some((e) => !e.consumed && (e.kind === 'critter' || e.kind === 'buddy') && e.y < HEIGHT);
+    return bait || this.catChase.active || this.mood.kind === 'sprint' || this.hazards.strayAbout();
+  }
+
   private isStunned(): boolean {
     return this.elapsed < this.stunnedUntil;
   }
@@ -447,12 +433,13 @@ export class ChaseScene extends Phaser.Scene {
     if (this.rowDistance < ROW_SPACING_PX) return;
     this.rowDistance -= ROW_SPACING_PX;
     // The very first row hands over a skateboard right in front of you: the chase is about grabbing rides.
-    const planned = this.nextId === 0 ? [{ kind: 'ride' as const, lane: 1 as Lane, tag: 'skate' }] : planChaseRow(Math.random, this.meters, seconds, seconds - this.lastRideAt / 1000);
+    const planned = this.nextId === 0 ? [{ kind: 'ride' as const, lane: 1 as Lane, tag: 'skate' }] : planChaseRow(Math.random, { meters: this.meters, seconds, sinceRide: seconds - this.lastRideAt / 1000, baitAllowed: !this.dogDistracted(), poops: this.poopsPicked, promised: this.promisedRide });
     const row = this.hazards.planRow(planned);
     if (row.some((spec) => spec.kind === 'ride')) this.lastRideAt = this.elapsed;
+    if (row.some((spec) => spec.kind === 'ride' && spec.tag === this.promisedRide)) this.promisedRide = undefined;
     // A world can leave a kind out entirely (no puddles at sea): an empty skin list means none of those here.
     for (const spec of row.filter((r) => this.biome.skins[r.kind]?.length !== 0)) {
-      const e: Entity = { id: this.nextId++, kind: spec.kind, lane: spec.lane, y: -40, consumed: false, ignoredByDog: false, tag: spec.tag };
+      const e: Entity = { id: this.nextId++, kind: spec.kind, lane: spec.lane, y: -40, consumed: false, ignoredByDog: false, tag: spec.tag, skin: spec.skin };
       if (e.kind === 'crosser') {
         e.x = e.lane === 0 ? 10 : WIDTH - 10;
         e.vx = e.lane === 0 ? CROSSER_SPEED : -CROSSER_SPEED;
@@ -517,7 +504,6 @@ export class ChaseScene extends Phaser.Scene {
       else if (e.kind === 'toss' && basket && dx < BASKET_REACH_PX) this.pocketItem(e);
       if (!this.touching(e, this.ownerX, OWNER_Y)) continue;
       if (e.kind === 'ride') this.mount(e);
-      else if (e.kind === 'boost') this.grabBoost(e);
       else if (e.kind === 'toss') this.pocketItem(e);
       else if (e.kind === 'shield') this.tieBalloon(e);
       else if (isObstacle(e.kind) || SLIPPERY.has(e.kind)) this.hitObstacle(e);
@@ -571,16 +557,17 @@ export class ChaseScene extends Phaser.Scene {
   private pocketItem(e: Entity): void {
     const kind = e.tag as TossKind;
     this.score += SCORE_PICKUP;
+    // A full pocket never wastes a pickup: the oldest thing in it is thrown to the dog to make room.
     const full = this.pocket.length >= POCKET_SIZE;
+    if (full) this.toss(true);
     e.consumed = true;
     const sprite = this.view.take(e.id);
-    if (full || !sprite) sprite?.destroy();
-    else {
+    if (sprite) {
       // The pickup flies down into its pocket slot, and only lands there when it arrives.
       const target = this.pocketView.slot(this.pocket.length);
       this.tweens.add({ targets: sprite, x: target.x, y: target.y, scale: ART_SCALE * 0.9, duration: 320, ease: 'Cubic.easeIn', onComplete: () => sprite.destroy() });
     }
-    if (!full) this.pocket = [...this.pocket, kind];
+    this.pocket = [...this.pocket, kind];
     track('pocket', { run: this.run, t: this.elapsed, kind, full, held: this.pocket.length });
     sfx.pickup(1);
   }
@@ -719,17 +706,23 @@ export class ChaseScene extends Phaser.Scene {
     this.poopsTotal += 1;
   }
 
+  // A good owner picks it up, and each one opens the next better ride before the distance would.
   private pickPoop(e: Entity): void {
     this.consume(e);
+    const opens = nextPoopRide(this.meters, this.poopsPicked);
     this.poopsPicked += 1;
     this.earn('poop');
     this.score += SCORE_POOP;
-    this.popText(this.ownerX, OWNER_Y - 50, `捡起便便！好主人 +${SCORE_POOP}`, '#a5d6a7');
+    const unlocked = opens && rideOpen(opens, this.meters, this.poopsPicked) ? opens : undefined;
+    if (unlocked) this.promisedRide = unlocked;
+    const opened = unlocked ? `\n解锁${this.rideName(unlocked)}，马上就来！` : '';
+    this.popText(this.ownerX, OWNER_Y - 60, `好主人！+${SCORE_POOP}${opened}`, '#a5d6a7');
     sfx.pickup(3);
     track('poop', { run: this.run, t: this.elapsed, picked: true });
   }
 
-  private toss(): void {
+  // `auto`: thrown for you because your pocket was full.
+  private toss(auto = false): void {
     if (this.ended) return;
     const [kind, ...rest] = this.pocket;
     if (!kind) {
@@ -743,7 +736,7 @@ export class ChaseScene extends Phaser.Scene {
       this.fling(look.key, taker.x, taker.y);
       this.popText(taker.x, Math.max(80, taker.y - 60), `${taker.who}叼着${look.name}走了`, '#a5d6a7');
       sfx.charged();
-      track('toss', { run: this.run, t: this.elapsed, kind, gap: Math.round(this.gap), to: taker.who });
+      track('toss', { run: this.run, t: this.elapsed, kind, gap: Math.round(this.gap), to: taker.who, auto });
       this.earn(taker.taker === 'chaser' ? 'feed' : 'stray_fed');
       return;
     }
@@ -753,7 +746,7 @@ export class ChaseScene extends Phaser.Scene {
     if (look.smash) this.smashAhead(look.name);
     this.setMood({ kind: spec.mood, until: this.elapsed + spec.ms }, look.key, look.line, '#ffeb3b', THROW_LOOK[spec.mood]);
     sfx.charged();
-    track('toss', { run: this.run, t: this.elapsed, kind, gap: Math.round(this.gap) });
+    track('toss', { run: this.run, t: this.elapsed, kind, gap: Math.round(this.gap), auto });
   }
 
   private fling(key: string, x: number, y: number): void {
@@ -839,10 +832,10 @@ export class ChaseScene extends Phaser.Scene {
 
   private render(): void {
     const y = this.dogY();
-    const running = this.mood.kind !== 'stop' && this.mood.kind !== 'skid';
+    const running = this.mood.kind !== 'stop';
     this.dog.update(this.elapsed, this.dogX, y, running ? 'run' : this.dogLook, dogPace(this.mood), this.biome.swim);
     this.dog.wearHelmet(Boolean(this.biome.helmet));
-    this.owner.update(this.elapsed, this.ownerX, this.ride?.kind, this.isStunned(), this.elapsed < this.invulnerableUntil, this.shielded, this.biome, this.hazards.sliding(!this.ride), this.hazards.lifted(this.elapsed) ? this.biome.rules?.boost?.art : undefined);
+    this.owner.update(this.elapsed, this.ownerX, this.ride?.kind, this.isStunned(), this.elapsed < this.invulnerableUntil, this.shielded, this.biome);
     this.renderLeash();
     this.renderRideTimer();
     this.bubble.setPosition(this.dogX + 22, y - 30).setTexture(this.moodIcon).setVisible(this.mood.kind !== 'run' && y > -20);
@@ -857,7 +850,9 @@ export class ChaseScene extends Phaser.Scene {
       .setColor(lost ? '#ff5252' : '#ffffff')
       .setAlpha(blink);
     this.pocketView.render(this.pocket.map((k) => this.tossLook(k).key), lost, this.elapsed);
-    this.hud.render(this.score, Math.floor(this.meters), this.best, this.gapMeter(), this.elapsed);
+    const locked = this.toiletAllowed() ? nextPoopRide(this.meters, this.poopsPicked) : undefined;
+    const hint = locked ? `捡1坨便便解锁${this.rideName(locked)}` : '';
+    this.hud.render(this.score, Math.floor(this.meters), this.best, this.gapMeter(), this.elapsed, hint);
   }
 
   private renderRideTimer(): void {
@@ -888,8 +883,8 @@ export class ChaseScene extends Phaser.Scene {
   // Speed lines on the road, more and longer the faster the ride, so a better ride feels faster at a glance.
   private renderStreaks(dy: number): void {
     const ride = this.ride && !this.isStunned() ? RIDES[this.ride.kind] : undefined;
-    // Sliding on ice or surfing a wave shows speed lines too, even on foot.
-    const boost = (this.hazards.sliding(!this.ride) ? 2 : 0) + (this.hazards.boosting(this.elapsed) ? 3 : 0);
+    // Surfing a wave shows speed lines too, even on foot.
+    const boost = this.hazards.surfing(this.elapsed) ? 3 : 0;
     const tier = Math.min(5, (ride?.tier ?? 0) + boost);
     this.streaks.clear();
     if (tier === 0) return;
@@ -908,10 +903,8 @@ export class ChaseScene extends Phaser.Scene {
     return { fill, color, label: fill < 0.3 ? '狗要跑丢了！' : '离狗狗', labelColor: fill < 0.3 ? '#ff8a80' : '#fff', blink: fill < 0.3 };
   }
 
-  // Arriving in a world: the chase slows down for a moment while a see-through banner under the HUD says what to watch
-  // out for here, out of the way of the road.
+  // Arriving in a world: a see-through banner under the HUD says what to watch out for here, out of the way of the road.
   private introduce(biome: Biome, title: string): void {
-    this.slowLeft = INTRO_MS;
     const card = this.add.container(WIDTH / 2, 108).setDepth(40).setAlpha(0);
     card.add([
       this.add.rectangle(0, 0, WIDTH - 24, 78, 0x1d2d3b, 0.45).setStrokeStyle(2, 0xffd54f, 0.7),
@@ -922,7 +915,7 @@ export class ChaseScene extends Phaser.Scene {
       targets: card,
       tweens: [
         { alpha: 1, duration: 160 },
-        { alpha: 1, duration: INTRO_MS + 800 },
+        { alpha: 1, duration: INTRO_MS },
         { alpha: 0, duration: 300 },
       ],
       onComplete: () => card.destroy(),

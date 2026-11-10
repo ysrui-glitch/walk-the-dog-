@@ -48,8 +48,6 @@ export class EntityView {
       add(this.scene.add.circle(x, e.y, 18, 0xffeb3b, 0.4).setStrokeStyle(2, 0xffc107).setDepth(3), 0, true);
     } else if (e.kind === 'shield') {
       add(this.scene.add.circle(x, e.y, 24, 0xff80ab, 0.35).setStrokeStyle(2, 0xff4081).setDepth(3), 0, true);
-    } else if (e.kind === 'boost') {
-      add(this.scene.add.circle(x, e.y, 26, 0x7cf3ff, 0.35).setStrokeStyle(3, 0x00e5ff).setDepth(3), 0, true);
     } else if (e.kind === 'poop') {
       add(this.scene.add.circle(x, e.y, 20, 0xa5d6a7, 0.4).setStrokeStyle(2, 0x66bb6a).setDepth(3), 0, true);
     }

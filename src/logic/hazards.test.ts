@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Lane } from '../config';
-import { LIGHT_MS, SHARK_LUNGE_MS, dogMeetsZone, pullTowards, swayX, SHARK_OUTRUN_TIER, zoneRow, dogReached, nextShark, nextTide, bandAt, sharkHungry, waterLanes, waveFront, withPickup, type Shark, type Tide } from './hazards';
+import { CHARGE_PX_S, CHARGE_START_PX, LIGHT_MS, chargerY, nextCharger, type Charger, SHARK_LUNGE_MS, dogMeetsZone, pullTowards, swayX, SHARK_OUTRUN_TIER, zoneRow, dogReached, nextShark, nextTide, bandAt, sharkHungry, waterLanes, waveFront, withPickup, type Shark, type Tide } from './hazards';
 
 const always = (x: number) => () => x;
 
@@ -79,7 +79,7 @@ describe('the tide', () => {
   });
 });
 
-describe('the ice', () => {
+describe('zones', () => {
   it('has nothing to crash into and nothing crossing it, but keeps the pickups', () => {
     const row = zoneRow([
       { kind: 'pole', lane: 1 },
@@ -90,7 +90,7 @@ describe('the ice', () => {
     expect(row).toEqual([{ kind: 'toss', lane: 1, tag: 'ball' }]);
   });
 
-  it('trips up the dog even when it is far ahead, off the top of the screen', () => {
+  it('reach the dog even when it is far ahead, off the top of the screen', () => {
     expect(dogReached({ top: -300, bottom: 30 }, -200)).toBe(true);
     expect(dogReached({ top: -300, bottom: 30 }, 200)).toBe(false);
   });
@@ -101,12 +101,10 @@ describe('the ice', () => {
   });
 });
 
-describe('zones', () => {
-  it('makes the dog skid on ice, and wait at a crosswalk only while the light is red', () => {
-    expect(dogMeetsZone('ice', 0)).toBe('skid');
+describe('the crosswalk', () => {
+  it('stops the dog only while the light is red', () => {
     expect(dogMeetsZone('crosswalk', 0)).toBe('red');
     expect(dogMeetsZone('crosswalk', LIGHT_MS)).toBeUndefined();
-    expect(dogMeetsZone('slope', 0)).toBeUndefined();
   });
 });
 
@@ -121,5 +119,32 @@ describe('black holes and tornadoes', () => {
     expect(Math.min(...xs)).toBeGreaterThanOrEqual(60);
     expect(Math.max(...xs)).toBeLessThanOrEqual(300);
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(150);
+  });
+});
+
+describe('chargers', () => {
+  function charge(spawnLane: Lane, laneThen: Lane) {
+    let c: Charger = { kind: 'none', nextAt: 0 };
+    const events: string[] = [];
+    for (let now = 0; now < 4000; now += 20) {
+      const step = nextCharger(c, now, 0.02, now === 0 ? spawnLane : laneThen, () => 0.5);
+      c = step.charger;
+      if (step.event) events.push(step.event);
+    }
+    return events;
+  }
+
+  it('aims at your lane and knocks you down if you stay in it', () => {
+    expect(charge(1, 1)).toEqual(['charge_coming', 'charge_hit']);
+  });
+
+  it('misses if you move out of its lane in time', () => {
+    expect(charge(1, 2)).toEqual(['charge_coming', 'charge_miss']);
+  });
+
+  it('flashes its lane for a couple of seconds before it arrives, from behind or from ahead', () => {
+    expect(CHARGE_START_PX / CHARGE_PX_S).toBeGreaterThan(1.8);
+    expect(chargerY('behind', 100, 550)).toBeGreaterThan(550);
+    expect(chargerY('ahead', 100, 550)).toBeLessThan(550);
   });
 });

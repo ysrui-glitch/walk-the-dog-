@@ -13,7 +13,7 @@ const DUST_EVERY_MS = 130;
 const BIG_RIDE_TIER = 3;
 const BIG_RIDE_SCALE = 1.3;
 
-export type DogLook = 'run' | 'stand' | 'wag' | 'squat' | 'pee' | 'skid';
+export type DogLook = 'run' | 'stand' | 'wag' | 'squat' | 'pee';
 
 // The dog: a four-frame run that speeds up with its pace and flips round when it runs back to you, plus poses for
 // stopping, eating (tail wagging) and squatting.
@@ -46,11 +46,6 @@ export class DogActor {
       }
       s.setTexture(`${key}-swim-${this.frame % 2}`).setFlipX(pace < 0);
       s.y = y + Math.sin(now / 200) * 2;
-      return;
-    }
-    if (look === 'skid') {
-      // Legs splayed, spinning round on the ice.
-      s.setTexture(`${key}-run-1`).setFlipX(Math.floor(now / 300) % 2 === 0).setAngle((now * 0.7) % 360);
       return;
     }
     if (look === 'squat' || look === 'pee' || look === 'stand') s.setTexture(`${key}-${look}`).setFlipX(false);
@@ -94,7 +89,6 @@ export class OwnerActor {
   readonly ride: Phaser.GameObjects.Image;
   private readonly balloon: Phaser.GameObjects.Image;
   private readonly helmet: Phaser.GameObjects.Image;
-  private readonly carrier: Phaser.GameObjects.Image;
   private frame = 0;
   private nextFrameAt = 0;
   private nextDustAt = 0;
@@ -105,20 +99,10 @@ export class OwnerActor {
     this.body = scene.add.image(0, OWNER_Y, 'owner-run-0').setScale(ACTOR_SCALE).setDepth(10);
     this.balloon = scene.add.image(0, OWNER_Y, 'ride-balloon').setScale(ACTOR_SCALE).setDepth(11).setVisible(false);
     this.helmet = scene.add.image(0, OWNER_Y, 'fx-helmet').setScale(ACTOR_SCALE).setDepth(11).setVisible(false);
-    this.carrier = scene.add.image(0, OWNER_Y, 'dec-pterodactyl').setScale(ART_SCALE * 1.6).setDepth(12).setVisible(false);
   }
 
-  // `towed`: sliding on your feet (over ice, down a slope). `carrier`: carried through the air by this (a pterodactyl).
-  update(now: number, x: number, ride: RideKind | undefined, stunned: boolean, blinking: boolean, shielded: boolean, biome: Biome, towed = false, carrier?: string): void {
-    this.pose = this.place(now, x, ride, stunned, blinking, biome, towed);
-    this.carrier.setVisible(carrier !== undefined);
-    if (carrier !== undefined) {
-      // Lifted off the ground, hanging from the claws of whatever carries you, with its shadow left on the road.
-      this.ride.setVisible(false);
-      this.body.setVisible(true).setTexture('owner-ride').setAlpha(1).setAngle(Math.sin(now / 150) * 6).setY(OWNER_Y - 34 + Math.sin(now / 120) * 4);
-      this.carrier.setTexture(carrier).setPosition(x, this.body.y - 30).setScale(ART_SCALE * (1.6 + 0.1 * Math.sin(now / 60)));
-      this.pose = 'ride';
-    }
+  update(now: number, x: number, ride: RideKind | undefined, stunned: boolean, blinking: boolean, shielded: boolean, biome: Biome): void {
+    this.pose = this.place(now, x, ride, stunned, blinking, biome);
     this.helmet.setVisible(Boolean(biome.helmet) && this.body.visible && this.pose !== 'fall').setPosition(this.body.x + 2, this.body.y - 15);
     const shield = biome.shield ?? DEFAULT_SHIELD;
     this.balloon.setVisible(shielded).setTexture(shield.key).setAngle(0);
@@ -132,7 +116,7 @@ export class OwnerActor {
     }
   }
 
-  private place(now: number, x: number, ride: RideKind | undefined, stunned: boolean, blinking: boolean, biome: Biome, towed: boolean): OwnerPose {
+  private place(now: number, x: number, ride: RideKind | undefined, stunned: boolean, blinking: boolean, biome: Biome): OwnerPose {
     const b = this.body.setVisible(true).setAngle(0).setPosition(x, OWNER_Y).setScale(ACTOR_SCALE);
     b.setAlpha(blinking ? 0.5 + 0.5 * Math.sin(now / 60) : 1);
     this.ride.setVisible(false).setAngle(0);
@@ -148,11 +132,6 @@ export class OwnerActor {
       b.setTexture(`owner-swim-${this.frame % 2}`).setY(OWNER_Y + 8 + Math.sin(now / 200) * 2);
       this.dust(now, x, OWNER_Y + 22);
       return 'run';
-    }
-    if (!ride && towed) {
-      // Leaning back on the leash, sliding on both feet.
-      b.setTexture('owner-ride').setAngle(-10 + Math.sin(now / 90) * 2);
-      return 'ride';
     }
     if (!ride) {
       if (now >= this.nextFrameAt) {

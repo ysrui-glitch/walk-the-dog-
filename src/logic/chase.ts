@@ -21,11 +21,11 @@ export interface RideSpec {
 }
 
 export const RIDES: Readonly<Record<RideKind, RideSpec>> = {
-  skate: { name: '滑板', ratio: 1.1, ms: 6000, unlock: 0, weight: 5, tier: 1 },
-  scooter: { name: '滑板车', ratio: 1.25, ms: 6000, unlock: 60, weight: 4, tier: 2 },
-  cycle: { name: '自行车', ratio: 1.42, ms: 5500, unlock: 180, weight: 3, tier: 3 },
-  moto: { name: '电动车', ratio: 1.62, ms: 5000, unlock: 300, weight: 2, tier: 4 },
-  car: { name: '汽车', ratio: 1.9, ms: 4500, unlock: 450, weight: 1, tier: 5 },
+  skate: { name: '滑板', ratio: 1.08, ms: 6000, unlock: 0, weight: 5, tier: 1 },
+  scooter: { name: '滑板车', ratio: 1.2, ms: 6000, unlock: 60, weight: 4, tier: 2 },
+  cycle: { name: '自行车', ratio: 1.33, ms: 5500, unlock: 180, weight: 3, tier: 3 },
+  moto: { name: '电动车', ratio: 1.48, ms: 5000, unlock: 300, weight: 2, tier: 4 },
+  car: { name: '汽车', ratio: 1.68, ms: 4500, unlock: 450, weight: 1, tier: 5 },
 };
 
 // What each star adds on top of the speed, and a ride keeps every perk below its own: a skateboard hops puddles, a
@@ -75,9 +75,7 @@ export type DogMood =
   | { readonly kind: 'stop'; readonly until: number }
   | { readonly kind: 'back'; readonly until: number }
   | { readonly kind: 'slow'; readonly until: number }
-  | { readonly kind: 'sprint'; readonly until: number }
-  // Skidding and spinning on ice, sliding back towards the owner.
-  | { readonly kind: 'skid'; readonly until: number };
+  | { readonly kind: 'sprint'; readonly until: number };
 
 export interface TossSpec {
   readonly name: string;
@@ -109,7 +107,7 @@ export const TREE_BARK_MS = 1300;
 export const POOP_EVERY_MS = [12000, 20000] as const;
 export const POOP_MS = 1600;
 
-const MOOD_PACE = { run: 1, stop: 0, back: -0.6, slow: 0.45, sprint: 1.5, skid: -0.5 } as const;
+const MOOD_PACE = { run: 1, stop: 0, back: -0.6, slow: 0.45, sprint: 1.5 } as const;
 
 export function settleMood(mood: DogMood, now: number): DogMood {
   return mood.kind !== 'run' && now >= mood.until ? { kind: 'run' } : mood;
@@ -162,8 +160,8 @@ export function nextSlip(slip: Slip, gap: number, now: number): Slip {
   return now - slip.since >= SLIP_MS ? { kind: 'lost' } : slip;
 }
 
-function weighted<K extends string>(random: () => number, table: Readonly<Record<K, { unlock: number; weight: number }>>, meters: number): K {
-  const open = (Object.keys(table) as K[]).filter((k) => meters >= table[k].unlock);
+function weighted<K extends string>(random: () => number, table: Readonly<Record<K, { weight: number }>>, isOpen: (k: K) => boolean): K {
+  const open = (Object.keys(table) as K[]).filter(isOpen);
   const total = open.reduce((sum, k) => sum + table[k].weight, 0);
   let roll = random() * total;
   for (const k of open) {
@@ -173,19 +171,33 @@ function weighted<K extends string>(random: () => number, table: Readonly<Record
   return open[open.length - 1];
 }
 
-export function pickRide(random: () => number, meters: number): RideKind {
-  return weighted(random, RIDES, meters);
+// Better rides open up further along the walk, or sooner for a good owner: each poop you pick up opens the next one
+// (the first opens the bike, the second the motorbike, the third the car).
+const POOP_OPENS_FROM_TIER = 3;
+
+export function rideOpen(kind: RideKind, meters: number, poops: number): boolean {
+  const { unlock, tier } = RIDES[kind];
+  return meters >= unlock || (tier >= POOP_OPENS_FROM_TIER && tier < POOP_OPENS_FROM_TIER + poops);
+}
+
+// What picking up one more poop would open, if anything is still locked. Only the bike and up open this way; the
+// scooter comes with distance alone.
+export function nextPoopRide(meters: number, poops: number): RideKind | undefined {
+  return (Object.keys(RIDES) as RideKind[]).find((kind) => RIDES[kind].tier >= POOP_OPENS_FROM_TIER && !rideOpen(kind, meters, poops));
+}
+
+export function pickRide(random: () => number, meters: number, poops = 0): RideKind {
+  return weighted(random, RIDES, (kind) => rideOpen(kind, meters, poops));
 }
 
 export function pickToss(random: () => number, meters: number): TossKind {
-  return weighted(random, TOSSES, meters);
+  return weighted(random, TOSSES, (kind) => meters >= TOSSES[kind].unlock);
 }
 
-// The texture a pickup is drawn with: rides and throwables look the same in every biome; a boost names its own art.
+// The texture a pickup is drawn with: rides and throwables look the same in every biome.
 export function chaseArt(kind: EntityKind, tag: string | undefined): string | undefined {
   if (kind === 'ride' || kind === 'toss') return `${kind}-${tag}`;
   if (kind === 'shield') return 'ride-balloon';
-  if (kind === 'boost') return tag;
   if (kind === 'puddle' && tag) return `pud-${tag}`;
   return undefined;
 }
@@ -194,6 +206,8 @@ export interface ChaseSpec {
   readonly kind: EntityKind;
   readonly lane: Lane;
   readonly tag?: string;
+  // Drawn with this texture instead of the world's usual one for its kind.
+  readonly skin?: string;
 }
 
 const OBSTACLE_START = 0.35;
@@ -208,7 +222,7 @@ const RIDE_GAP_S = 1;
 const GAP_STRETCH = 1 / 45;
 const RIDE_DROUGHT_S = 4;
 const DROUGHT_STRETCH = 1 / 18;
-const TOSS_CHANCE = 0.11;
+const TOSS_CHANCE = 0.09;
 const MAX_EXTRAS = 2;
 // Late in the chase there is more to distract the dog and less to throw at it.
 const CRITTER_CHANCE = 0.08;
@@ -228,8 +242,21 @@ function obstacleKind(random: () => number, meters: number): EntityKind {
 }
 
 // One row of road: at most two obstacles so a lane always stays open, then at most two pickups or dog baits.
-// `sinceRide`: seconds since the last ride was laid out.
-export function planChaseRow(random: () => number, meters: number, seconds: number, sinceRide: number): ChaseSpec[] {
+export interface RowPlan {
+  readonly meters: number;
+  readonly seconds: number;
+  // Seconds since the last ride was laid out.
+  readonly sinceRide: number;
+  // Whether something for the dog (a cat, a gull, another dog) may turn up now; there is never more than one at a
+  // time, so the road stays easy to read.
+  readonly baitAllowed?: boolean;
+  // Poops picked up this run, which open better rides early.
+  readonly poops?: number;
+  // A ride just opened by a poop: the next ride laid out is this one, so the reward shows up straight away.
+  readonly promised?: RideKind;
+}
+
+export function planChaseRow(random: () => number, { meters, seconds, sinceRide, baitAllowed = true, poops = 0, promised }: RowPlan): ChaseSpec[] {
   const lanes = [...LANES].sort(() => random() - 0.5);
   const row: ChaseSpec[] = [];
   const obstacleChance = Math.min(OBSTACLE_MAX, OBSTACLE_START + seconds / 400);
@@ -237,14 +264,16 @@ export function planChaseRow(random: () => number, meters: number, seconds: numb
   if (random() < obstacleChance / 3) row.push({ kind: 'pole', lane: lanes.pop()! });
   const obstacles = row.length;
   const extras: [number, EntityKind, (() => string) | undefined][] = [
-    [rideChance(seconds, sinceRide), 'ride', () => pickRide(random, meters)],
+    [rideChance(seconds, sinceRide), 'ride', () => promised ?? pickRide(random, meters, poops)],
     [Math.max(TOSS_CHANCE / 2, TOSS_CHANCE - seconds / TOSS_THINNING_S), 'toss', () => pickToss(random, meters)],
     [meters >= SHIELD_UNLOCK_M ? SHIELD_CHANCE : 0, 'shield', undefined],
-    [meters >= 40 ? CRITTER_CHANCE + CRITTER_GAIN_PER_S * seconds : 0, 'critter', undefined],
-    [meters >= 30 ? BUDDY_CHANCE : 0, 'buddy', undefined],
+    [baitAllowed && meters >= 40 ? CRITTER_CHANCE + CRITTER_GAIN_PER_S * seconds : 0, 'critter', undefined],
+    [baitAllowed && meters >= 30 ? BUDDY_CHANCE : 0, 'buddy', undefined],
   ];
   for (const [chance, kind, tag] of extras) {
     if (lanes.length === 0 || row.length - obstacles >= MAX_EXTRAS) break;
+    // One thing for the dog per row at most: a critter and another dog together would be two at once.
+    if (kind === 'buddy' && row.some((spec) => spec.kind === 'critter')) continue;
     if (random() < chance) row.push({ kind, lane: lanes.pop()!, tag: tag?.() });
   }
   return row;

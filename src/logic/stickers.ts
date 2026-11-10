@@ -12,18 +12,14 @@ export type StickerEvent =
   | 'red'
   | 'dodge_roller'
   | 'smash_roller'
-  | 'slope'
   | 'stray_fed'
   | 'surf'
   | 'tide_full'
   | 'miss'
   | 'feed'
   | 'outrun'
-  | 'skid'
-  | 'tow'
+  | 'dodge_charge'
   | 'braved'
-  | 'lift'
-  | 'ring'
   | 'hole_passed';
 
 export interface Sticker {
@@ -48,12 +44,12 @@ const PAGES: Readonly<Record<Biome['id'], readonly Row[]>> = {
     ['car', '城市飙车', '在城市坐上汽车', 'ride-car'],
   ],
   park: [
-    ['slope', '草坡滑行', '走路时顺着草坡滑下去', 'dec-flower'],
+    ['dodge_roller', '躲开割草机', '躲开开过来的割草机', 'ob-mower'],
+    ['smash_roller', '撞飞割草机', '开汽车撞开割草机', 'fx-wheel'],
+    ['poop', '公园好主人', '在公园捡起便便', 'dec-mushroom'],
     ['stray_fed', '引开野狗', '扔东西把野狗引开', 'buddy-poodle'],
     ['cat_treed', '松鼠上树', '狗追松鼠，松鼠逃上树', 'squirrel-0'],
-    ['poop', '公园好主人', '在公园捡起便便', 'dec-mushroom'],
     ['catch', '公园抓绳', '在公园抓住狗绳', 'dec-butterfly'],
-    ['car', '公园兜风', '在公园坐上汽车', 'dec-tree'],
   ],
   beach: [
     ['surf', '冲浪高手', '踩着交通工具冲一次浪', 'ride-surf'],
@@ -72,8 +68,8 @@ const PAGES: Readonly<Record<Biome['id'], readonly Row[]>> = {
     ['car', '快艇', '在大海坐上快艇', 'ride-speedboat'],
   ],
   snow: [
-    ['skid', '狗狗滑冰', '看狗在冰上滑倒', 'dec-mitten'],
-    ['tow', '雪橇狗', '在冰上被狗拉着滑', 'ride-sled'],
+    ['dodge_charge', '躲开雪橇犬', '雪橇犬冲过来时让开', 'ob-huskysled'],
+    ['shield_pop', '气球救命', '在雪地让气球替你挡一次', 'dec-mitten'],
     ['smash_roller', '砸碎大雪球', '砸碎或撞碎一个大雪球', 'toss-snowball'],
     ['dodge_roller', '躲开大雪球', '躲开滚下来的大雪球', 'ob-giantsnowball'],
     ['catch', '雪地抓绳', '在雪地抓住狗绳', 'dec-igloo'],
@@ -88,7 +84,7 @@ const PAGES: Readonly<Record<Biome['id'], readonly Row[]>> = {
     ['car', '越野车', '在沙漠坐上越野车', 'ride-jeep'],
   ],
   prehistoric: [
-    ['lift', '翼龙飞行', '被翼龙叼起来飞', 'dec-pterodactyl'],
+    ['dodge_charge', '躲过翼龙', '翼龙俯冲时让开', 'dec-pterodactyl'],
     ['feed', '喂霸王龙', '扔东西喂走霸王龙', 'toss-meat'],
     ['miss', '躲过霸王龙', '霸王龙扑过来时躲开', 'fx-trexhead'],
     ['outrun', '甩掉霸王龙', '骑大恐龙甩掉霸王龙', 'ride-raptor'],
@@ -96,7 +92,7 @@ const PAGES: Readonly<Record<Biome['id'], readonly Row[]>> = {
     ['car', '骑腕龙', '在史前骑上腕龙', 'ride-brachio'],
   ],
   space: [
-    ['ring', '穿越加速环', '穿过一个加速环', 'fx-boostring'],
+    ['dodge_roller', '躲开陨石', '躲开砸下来的陨石', 'ob-meteor'],
     ['hole_passed', '逃离黑洞', '从黑洞旁边擦过去', 'fx-blackhole'],
     ['cat_treed', '外星人逃跑', '狗追外星人，外星人逃走', 'alien-0'],
     ['shield_pop', '防护罩', '让防护罩替你挡一次', 'shield-bubble'],

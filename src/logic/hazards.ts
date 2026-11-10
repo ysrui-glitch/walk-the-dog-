@@ -17,7 +17,7 @@ export interface ChaserRule {
 }
 
 // A band across the road that something happens on. The dog reacts when it gets there; the owner may too.
-export type ZoneKind = 'ice' | 'crosswalk' | 'slope';
+export type ZoneKind = 'crosswalk';
 
 export interface ZoneRule {
   readonly kind: ZoneKind;
@@ -43,23 +43,20 @@ export interface RollerRule {
   readonly braves?: { readonly ride: RideKind; readonly perk: string; readonly line: string };
 }
 
-// Something to grab that shoots you forward: a pterodactyl that lifts you over everything, a boost ring.
-export interface BoostRule {
+// Something that charges down a lane at you, aimed at the lane you are in, either up from behind (a husky sled) or
+// diving in from ahead (a pterodactyl). Its lane flashes red for a couple of seconds first: get out of it.
+export interface ChargerRule {
   readonly art: string;
-  readonly chance: number;
-  readonly ms: number;
-  readonly factor: number;
-  // Carried through the air: nothing on the ground can hit you.
-  readonly lifts?: boolean;
-  readonly line: string;
+  readonly name: string;
+  readonly from: 'behind' | 'ahead';
 }
 
 export interface WorldRules {
   readonly chaser?: ChaserRule;
+  readonly charger?: ChargerRule;
   readonly tide?: boolean;
   readonly zone?: ZoneRule;
   readonly roller?: RollerRule;
-  readonly boost?: BoostRule;
   // A stray dog that runs at yours to play.
   readonly stray?: { readonly art: string };
   // Black holes that pull you into their lane.
@@ -178,17 +175,46 @@ export function nextTide(tide: Tide, now: number, ownerY: number, ownerLane: Lan
   return { tide: { ...tide, hit: true }, event: tide.lanes.includes(ownerLane) ? 'hit' : undefined };
 }
 
-// Zones. On ice (雪地) the dog skids, spinning and sliding back towards you, and pulls you along like a sled so it
-// can't get away. At a crosswalk (城市) the dog stops and waits if the light is red. Down a grassy slope (公园) you
-// slide fast on foot. Zones are clear of obstacles; nothing crosses them.
-export const DOG_SKID_MS = 1600;
-// Towed by the dog, the owner moves at least this share of the dog's speed.
-export const TOW_RATIO = 1.02;
-export const SLOPE_FACTOR = 1.4;
+export type Charger =
+  | { readonly kind: 'none'; readonly nextAt: number }
+  // `d` is how far it still is from the owner's row, in pixels; it goes negative once it has gone past.
+  | { readonly kind: 'coming' | 'passing'; readonly lane: Lane; readonly d: number };
+
+export type ChargerEvent = 'charge_coming' | 'charge_hit' | 'charge_miss';
+
+export const CHARGE_EVERY_MS = [6000, 9000] as const;
+export const CHARGE_FIRST_MS = 5000;
+// It starts well off screen so its lane flashes for a couple of seconds before it arrives.
+export const CHARGE_START_PX = 450;
+export const CHARGE_PX_S = 210;
+const CHARGE_GONE_PX = 700;
+
+export function chargerIdle(now: number, random: () => number): Charger {
+  return { kind: 'none', nextAt: now + between(random, CHARGE_EVERY_MS) };
+}
+
+export function nextCharger(c: Charger, now: number, dt: number, ownerLane: Lane, random: () => number): { charger: Charger; event?: ChargerEvent } {
+  if (c.kind === 'none') {
+    if (now < c.nextAt) return { charger: c };
+    return { charger: { kind: 'coming', lane: ownerLane, d: CHARGE_START_PX }, event: 'charge_coming' };
+  }
+  const d = c.d - CHARGE_PX_S * dt;
+  if (c.kind === 'passing') return { charger: d < -CHARGE_GONE_PX ? chargerIdle(now, random) : { ...c, d } };
+  if (d > 0) return { charger: { ...c, d } };
+  return { charger: { kind: 'passing', lane: c.lane, d }, event: ownerLane === c.lane ? 'charge_hit' : 'charge_miss' };
+}
+
+// Screen y of a charger `d` pixels from the owner's row.
+export function chargerY(from: ChargerRule['from'], d: number, ownerY: number): number {
+  return from === 'behind' ? ownerY + d : ownerY - d;
+}
+
+// Zones. At a crosswalk (城市) the dog stops and waits if the light is red. Zones are clear of obstacles; nothing
+// crosses them.
 export const RED_WAIT_MS = 1300;
 export const LIGHT_MS = 2000;
 
-export type DogZoneEvent = 'skid' | 'red';
+export type DogZoneEvent = 'red';
 
 export function lightAt(now: number): 'red' | 'green' {
   return Math.floor(now / LIGHT_MS) % 2 === 0 ? 'red' : 'green';
@@ -196,7 +222,6 @@ export function lightAt(now: number): 'red' | 'green' {
 
 // What the dog does on reaching a zone, if anything.
 export function dogMeetsZone(kind: ZoneKind, now: number): DogZoneEvent | undefined {
-  if (kind === 'ice') return 'skid';
   if (kind === 'crosswalk' && lightAt(now) === 'red') return 'red';
   return undefined;
 }

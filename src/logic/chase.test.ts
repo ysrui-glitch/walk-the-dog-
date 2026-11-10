@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RIDE_PERKS, hasPerk, newPerk, SHIELD_UNLOCK_M, CATCH_GAP, LOST_GAP, MAX_PULL_PX_S, RIDES, RIDE_TOP_UP_MS, SLIP_MS, dogBaseSpeed, mountRide, nextSlip, dogPace, nextGap, ownerSpeed, pickRide, planChaseRow, settleMood } from './chase';
+import { nextPoopRide, rideOpen, RIDE_PERKS, hasPerk, newPerk, SHIELD_UNLOCK_M, CATCH_GAP, LOST_GAP, MAX_PULL_PX_S, RIDES, RIDE_TOP_UP_MS, SLIP_MS, dogBaseSpeed, mountRide, nextSlip, dogPace, nextGap, ownerSpeed, pickRide, planChaseRow, settleMood } from './chase';
 import { isObstacle } from './world';
 
 function seeded(seed: number): () => number {
@@ -25,12 +25,12 @@ describe('the chase', () => {
 
   it('each better ride is clearly faster than the one before', () => {
     const ladder = (['skate', 'scooter', 'cycle', 'moto', 'car'] as const).map((k) => RIDES[k].ratio);
-    for (let i = 1; i < ladder.length; i++) expect(ladder[i] - ladder[i - 1]).toBeGreaterThan(0.14);
+    for (let i = 1; i < ladder.length; i++) expect(ladder[i] - ladder[i - 1]).toBeGreaterThan(0.09);
   });
 
   it('spreads rides out in time: none right after one, always one after a long drought, both longer later on', () => {
     const random = seeded(5);
-    const ride = (seconds: number, sinceRide: number) => planChaseRow(random, 500, seconds, sinceRide).some((s) => s.kind === 'ride');
+    const ride = (seconds: number, sinceRide: number) => planChaseRow(random, { meters: 500, seconds, sinceRide }).some((s) => s.kind === 'ride');
     for (let i = 0; i < 200; i++) {
       expect(ride(0, 0.5)).toBe(false);
       expect(ride(0, 5)).toBe(true);
@@ -92,17 +92,49 @@ describe('the chase', () => {
     expect(late.has('car')).toBe(true);
   });
 
+  it('opens one better ride for each poop picked up, on top of what the distance opens', () => {
+    expect(rideOpen('cycle', 10, 0)).toBe(false);
+    expect(rideOpen('cycle', 10, 1)).toBe(true);
+    expect(rideOpen('moto', 10, 1)).toBe(false);
+    expect(rideOpen('car', 10, 3)).toBe(true);
+    expect(rideOpen('car', 1000, 0)).toBe(true);
+    expect(nextPoopRide(10, 0)).toBe('cycle');
+    expect(nextPoopRide(10, 1)).toBe('moto');
+    expect(nextPoopRide(100, 2)).toBe('car');
+    expect(nextPoopRide(100, 3)).toBeUndefined();
+    expect(nextPoopRide(350, 0)).toBe('car');
+    const random = seeded(9);
+    expect(new Set(Array.from({ length: 400 }, () => pickRide(random, 10, 3))).has('car')).toBe(true);
+  });
+
+  it('lays out a ride a poop just opened as the very next ride', () => {
+    const random = seeded(4);
+    for (let i = 0; i < 50; i++) {
+      const ride = planChaseRow(random, { meters: 10, seconds: 0, sinceRide: 30, poops: 3, promised: 'car' }).find((s) => s.kind === 'ride');
+      expect(ride?.tag).toBe('car');
+    }
+  });
+
   it('balloons only turn up once the walk is under way', () => {
     const random = seeded(3);
-    const rows = (meters: number) => Array.from({ length: 3000 }, () => planChaseRow(random, meters, 60, 3)).flat();
+    const rows = (meters: number) => Array.from({ length: 3000 }, () => planChaseRow(random, { meters, seconds: 60, sinceRide: 3 })).flat();
     expect(rows(SHIELD_UNLOCK_M - 1).some((s) => s.kind === 'shield')).toBe(false);
     expect(rows(SHIELD_UNLOCK_M + 100).some((s) => s.kind === 'shield')).toBe(true);
+  });
+
+  it('never puts something for the dog on the road while one is already about', () => {
+    const random = seeded(7);
+    const rows = Array.from({ length: 3000 }, () => planChaseRow(random, { meters: 500, seconds: 120, sinceRide: 3, baitAllowed: false })).flat();
+    expect(rows.some((s) => s.kind === 'critter' || s.kind === 'buddy')).toBe(false);
+    const free = Array.from({ length: 3000 }, () => planChaseRow(random, { meters: 500, seconds: 120, sinceRide: 3 }));
+    expect(free.flat().some((s) => s.kind === 'critter')).toBe(true);
+    for (const row of free) expect(row.filter((s) => s.kind === 'critter' || s.kind === 'buddy').length).toBeLessThanOrEqual(1);
   });
 
   it('every row leaves at least one lane free of obstacles', () => {
     const random = seeded(11);
     for (let i = 0; i < 2000; i++) {
-      const row = planChaseRow(random, 500, 300, 3);
+      const row = planChaseRow(random, { meters: 500, seconds: 300, sinceRide: 3 });
       const blocked = new Set(row.filter((s) => isObstacle(s.kind) || s.kind === 'puddle').map((s) => s.lane));
       expect(blocked.size).toBeLessThan(3);
       expect(new Set(row.map((s) => s.lane)).size).toBe(row.length);

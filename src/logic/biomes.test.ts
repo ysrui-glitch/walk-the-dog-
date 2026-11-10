@@ -13,7 +13,7 @@ describe('biomes', () => {
     for (const biome of BIOMES) {
       for (const options of Object.values(biome.skins)) for (const key of options ?? []) expect(ART[key], key).toBeDefined();
       const rules = biome.rules ?? {};
-      const ruleArt = [rules.chaser?.art, rules.roller?.art, rules.boost?.art, rules.stray?.art].filter((k) => k !== undefined);
+      const ruleArt = [rules.chaser?.art, rules.roller?.art, rules.charger?.art, rules.stray?.art].filter((k) => k !== undefined);
       const own = [...ruleArt, ...Object.values(biome.rides ?? {}).map((r) => r.key), ...Object.values(biome.tosses ?? {}).map((t) => t.key), ...(biome.shield ? [biome.shield.key] : []), ...(biome.ground?.overlays ?? [])];
       for (const key of [...biome.decor, biome.perch, ...own]) expect(ART[key], key).toBeDefined();
       if (biome.skins.critter) for (const key of biome.skins.critter) expect(ART[key.replace(/-0$/, '-1')], key).toBeDefined();
@@ -28,7 +28,7 @@ describe('biomes', () => {
   it('gives every world a threat of its own', () => {
     for (const biome of BIOMES) {
       const r = biome.rules ?? {};
-      expect([r.chaser, r.roller, r.stray, r.holes, r.tide].some(Boolean), biome.id).toBe(true);
+      expect([r.chaser, r.roller, r.charger, r.stray, r.holes, r.tide].some(Boolean), biome.id).toBe(true);
     }
   });
 

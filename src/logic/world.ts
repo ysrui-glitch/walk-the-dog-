@@ -14,9 +14,7 @@ export type EntityKind =
   | 'critter'
   | 'buddy'
   // Left behind by the dog, for the owner to pick up.
-  | 'poop'
-  // Grab it and it shoots you forward: a pterodactyl, a boost ring.
-  | 'boost';
+  | 'poop';
 
 export interface Entity {
   readonly id: number;
@@ -42,7 +40,7 @@ export interface Entity {
 }
 
 const OBSTACLES: ReadonlySet<EntityKind> = new Set(['pole', 'barrier', 'crosser']);
-const GOOD: ReadonlySet<EntityKind> = new Set(['ride', 'toss', 'shield', 'poop', 'boost']);
+const GOOD: ReadonlySet<EntityKind> = new Set(['ride', 'toss', 'shield', 'poop']);
 
 export function xOf(e: Entity): number {
   return e.x ?? LANE_X[e.lane];

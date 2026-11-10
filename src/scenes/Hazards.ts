@@ -4,6 +4,8 @@ import { HEIGHT, LANE_X, OWNER_Y, ROW_SPACING_PX, WIDTH, type Lane } from '../co
 import type { Biome } from '../logic/biomes';
 import type { ChaseSpec } from '../logic/chase';
 import {
+  CHARGE_FIRST_MS,
+  CHARGE_START_PX,
   HOLE_EVERY_MS,
   HOLE_FIRST_MS,
   PESTER_MS,
@@ -13,7 +15,6 @@ import {
   SHARK_FIRST_MS,
   SHARK_LUNGE_MS,
   SHARK_START_BEHIND,
-  SLOPE_FACTOR,
   STRAY_EVERY_MS,
   STRAY_FIRST_MS,
   STRAY_PX_S,
@@ -26,6 +27,8 @@ import {
   dogMeetsZone,
   dogReached,
   lightAt,
+  chargerY,
+  nextCharger,
   nextShark,
   nextTide,
   pullTowards,
@@ -37,6 +40,8 @@ import {
   zoneRow,
   type Band,
   type DogZoneEvent,
+  type Charger,
+  type ChargerEvent,
   type RollerRule,
   type Shark,
   type SharkEvent,
@@ -47,7 +52,7 @@ import {
 } from '../logic/hazards';
 
 export type Say = (x: number, y: number, text: string, color: string) => void;
-export type HazardEvent = SharkEvent | TideEvent | DogZoneEvent | 'rise' | 'zone' | 'roller' | 'stray' | 'pester' | 'hole' | 'pull' | 'swallow' | 'hole_passed';
+export type HazardEvent = SharkEvent | TideEvent | DogZoneEvent | ChargerEvent | 'rise' | 'zone' | 'roller' | 'stray' | 'pester' | 'hole' | 'pull' | 'swallow' | 'hole_passed';
 
 export interface Tick {
   readonly now: number;
@@ -59,6 +64,8 @@ export interface Tick {
   readonly dogY: number;
   // How far through the current world the owner is, 0 to 1.
   readonly progress: number;
+  // Something else already has the dog's attention, so a stray waits its turn.
+  readonly dogBusy: boolean;
 }
 
 type Zone = { -readonly [K in keyof Band]: Band[K] } & { readonly kind: ZoneKind; dogDone: boolean };
@@ -80,11 +87,10 @@ const HOLE_HIT_PX = 28;
 // A hole tugs at you almost as soon as it is in range.
 const FIRST_PULL_MS = 200;
 const STRAY_REACH_PX = 30;
-const ZONE_LINES: Partial<Record<ZoneKind, string>> = { ice: '狗拉着你在冰上滑！', slope: '顺着草坡滑下去！' };
 
-// Each world's rules on screen: the chaser (shark, T-rex) and its lunge, the rising tide and its waves, zones across
-// the road (ice, crosswalk, slope), the stray dog, black holes. Rollers and boosts are road entities and live
-// in the scene; this decides when they come.
+// Each world's rules on screen: the chaser (shark, T-rex) and its lunge, the rising tide and its waves, the crosswalk,
+// the stray dog, black holes, and chargers (a husky sled from behind, a diving pterodactyl). Rollers are road entities
+// and live in the scene; this decides when they come.
 export class WorldHazards {
   shark: Shark = { kind: 'away', nextAt: Infinity };
   // Set when a black hole has just pulled the owner a lane over.
@@ -97,13 +103,12 @@ export class WorldHazards {
   private zoneRowsLeft = 0;
   private rowsToZone = Infinity;
   private inZone: ZoneKind | undefined;
-  private boostUntil = 0;
-  private boostFactor = 1;
-  private liftedUntil = 0;
+  private surfUntil = 0;
   private washed: readonly Lane[] = [];
   private rollerAt = Infinity;
   private stray: Stray = { kind: 'none', nextAt: Infinity };
   private holes: Hole[] = [];
+  private charger: Charger = { kind: 'none', nextAt: Infinity };
   private holeAt = Infinity;
   private nextStompAt = 0;
   // Something to throw that the next row owes the player: a fish for a shark, a snowball for a giant snowball.
@@ -111,6 +116,7 @@ export class WorldHazards {
   private finX: number = LANE_X[1];
   private readonly fin: Phaser.GameObjects.Image;
   private readonly straySprite: Phaser.GameObjects.Image;
+  private readonly chargerSprite: Phaser.GameObjects.Image;
   private readonly strayMark: Phaser.GameObjects.Text;
   private readonly holeSprites: Phaser.GameObjects.Image[];
   private readonly sea: Phaser.GameObjects.Graphics;
@@ -128,6 +134,7 @@ export class WorldHazards {
     this.lungeMark = scene.add.graphics().setDepth(1.7);
     this.lungeSign = scene.add.text(0, OWNER_Y - 120, '!', { fontSize: '56px', color: '#ff1744', fontStyle: 'bold' }).setOrigin(0.5).setDepth(23).setStroke('#ffffff', 6).setVisible(false);
     this.fin = scene.add.image(0, 0, 'fx-fin').setScale(ART_SCALE * 1.2).setDepth(22).setVisible(false);
+    this.chargerSprite = scene.add.image(0, 0, 'ob-huskysled').setScale(ART_SCALE * 1.2).setDepth(12).setVisible(false);
     this.straySprite = scene.add.image(0, 0, 'buddy-poodle').setScale(ART_SCALE * 0.9).setDepth(10).setVisible(false);
     this.strayMark = scene.add.text(0, 0, '!', { fontSize: '40px', color: '#ff9100', fontStyle: 'bold' }).setOrigin(0.5).setDepth(23).setStroke('#ffffff', 6).setVisible(false);
     this.holeSprites = Array.from({ length: 3 }, () => scene.add.image(0, 0, 'fx-blackhole').setScale(ART_SCALE).setDepth(3).setVisible(false));
@@ -147,23 +154,20 @@ export class WorldHazards {
     this.stray = { kind: 'none', nextAt: rules.stray ? now + STRAY_FIRST_MS : Infinity };
     if (rules.stray) this.straySprite.setTexture(rules.stray.art);
     this.holeAt = rules.holes ? now + HOLE_FIRST_MS : Infinity;
+    this.charger = { kind: 'none', nextAt: rules.charger ? now + CHARGE_FIRST_MS : Infinity };
+    if (rules.charger) this.chargerSprite.setTexture(rules.charger.art);
   }
 
   roller(): RollerRule | undefined {
     return this.rules.roller;
   }
 
-  // Lays zones into the road (clear of obstacles), drops in boosts, and hands over what the last hazard owes you.
+  // Lays zones into the road (clear of obstacles), and hands over what the last hazard owes you.
   planRow(row: ChaseSpec[]): ChaseSpec[] {
     if (this.owed) {
       const tag = this.owed;
       this.owed = undefined;
       return withPickup(row, tag, this.random);
-    }
-    const boost = this.rules.boost;
-    if (boost && this.random() < boost.chance) {
-      const free = ([0, 1, 2] as const).filter((lane) => !row.some((spec) => spec.lane === lane));
-      if (free.length) row = [...row, { kind: 'boost', lane: free[Math.floor(this.random() * free.length)], tag: boost.art }];
     }
     const zone = this.rules.zone;
     if (!zone) return row;
@@ -185,6 +189,7 @@ export class WorldHazards {
     this.updateZones(t, events);
     this.updateStray(t, events);
     this.updateHoles(t, events);
+    this.updateCharger(t, events);
     if (t.now >= this.rollerAt && this.rules.roller) {
       const roller = this.rules.roller;
       this.rollerAt = t.now + between(this.random, roller.every);
@@ -229,15 +234,24 @@ export class WorldHazards {
     this.tide = tide.tide;
   }
 
+  private updateCharger({ now, dt, ownerLane }: Tick, events: HazardEvent[]): void {
+    const step = nextCharger(this.charger, now, dt, ownerLane, this.random);
+    this.charger = step.charger;
+    if (step.event) events.push(step.event);
+    const name = this.rules.charger?.name ?? '';
+    if (step.event === 'charge_coming') this.say(WIDTH / 2, OWNER_Y - 120, `${name}冲过来了！快让开`, '#ff8a80');
+    if (step.event === 'charge_miss') this.say(WIDTH / 2, OWNER_Y - 80, `躲开${name}了！`, '#a5d6a7');
+  }
+
+  chargerName(): string {
+    return this.rules.charger?.name ?? '';
+  }
+
   private updateZones({ now, dy, dogY }: Tick, events: HazardEvent[]): void {
     for (const z of this.zones) Object.assign(z, { top: z.top + dy, bottom: z.bottom + dy });
     this.zones = this.zones.filter((z) => z.top < HEIGHT);
     const here = bandAt(this.zones, OWNER_Y)?.kind;
-    if (here && here !== this.inZone) {
-      const line = ZONE_LINES[here];
-      if (line) this.say(WIDTH / 2, OWNER_Y - 90, line, '#e1f5fe');
-      events.push('zone');
-    }
+    if (here && here !== this.inZone) events.push('zone');
     this.inZone = here;
     for (const z of this.zones.filter((zone) => !zone.dogDone && dogReached(zone, dogY))) {
       z.dogDone = true;
@@ -246,10 +260,10 @@ export class WorldHazards {
     }
   }
 
-  private updateStray({ now, dt, dogX, dogY }: Tick, events: HazardEvent[]): void {
+  private updateStray({ now, dt, dogX, dogY, dogBusy }: Tick, events: HazardEvent[]): void {
     const s = this.stray;
     if (s.kind === 'none') {
-      if (now < s.nextAt) return;
+      if (now < s.nextAt || dogBusy) return;
       const side = this.random() < 0.5 ? 24 : WIDTH - 24;
       this.stray = { kind: 'coming', x: side, y: OWNER_Y - 30, until: Infinity };
       this.owed = 'bone';
@@ -305,13 +319,7 @@ export class WorldHazards {
 
   speedFactor(now: number, ownerLane: Lane, onFoot: boolean): number {
     const wading = onFoot && this.water.includes(ownerLane);
-    const sliding = onFoot && this.inZone === 'slope';
-    return (now < this.boostUntil ? this.boostFactor : 1) * (wading ? WADE_FACTOR : 1) * (sliding ? SLOPE_FACTOR : 1);
-  }
-
-  // The zone under the owner, if any.
-  zoneHere(): ZoneKind | undefined {
-    return this.inZone;
+    return (now < this.surfUntil ? SURF_BOOST : 1) * (wading ? WADE_FACTOR : 1);
   }
 
   // How many lanes the tide has covered.
@@ -319,32 +327,16 @@ export class WorldHazards {
     return this.water.length;
   }
 
-  // On the ice the dog tows you along.
-  towing(): boolean {
-    return this.inZone === 'ice';
-  }
-
-  // Sliding along on your feet: towed over ice, or down a grassy slope.
-  sliding(onFoot: boolean): boolean {
-    return this.inZone === 'ice' || (onFoot && this.inZone === 'slope');
-  }
-
   surf(now: number): void {
-    this.boost(now, SURF_MS, SURF_BOOST);
+    this.surfUntil = now + SURF_MS;
   }
 
-  boost(now: number, ms: number, factor: number, lifts = false): void {
-    this.boostUntil = now + ms;
-    this.boostFactor = factor;
-    if (lifts) this.liftedUntil = now + ms;
+  surfing(now: number): boolean {
+    return now < this.surfUntil;
   }
 
-  boosting(now: number): boolean {
-    return now < this.boostUntil;
-  }
-
-  lifted(now: number): boolean {
-    return now < this.liftedUntil;
+  strayAbout(): boolean {
+    return this.stray.kind !== 'none';
   }
 
   // One of the lanes the last wave washed over, where it left something behind.
@@ -376,6 +368,7 @@ export class WorldHazards {
     this.drawChaser(now, dt);
     this.drawSea(now, dt);
     this.drawZones(now);
+    this.drawCharger(now);
     const s = this.stray;
     this.straySprite.setVisible(s.kind !== 'none' && s.y > -30);
     this.strayMark.setVisible(s.kind === 'coming' && s.y > -10);
@@ -386,6 +379,26 @@ export class WorldHazards {
       sprite.setVisible(h !== undefined);
       if (h) sprite.setPosition(LANE_X[h.lane], h.y).setAngle(now / 4);
     }
+  }
+
+  // A charger: its lane flashes red, harder as it nears, then it rushes through. A diving pterodactyl grows as it
+  // swoops down; a husky sled comes up from behind.
+  private drawCharger(now: number): void {
+    const c = this.charger;
+    const rule = this.rules.charger;
+    this.chargerSprite.setVisible(c.kind !== 'none' && rule !== undefined);
+    if (c.kind === 'none' || !rule) return;
+    const y = chargerY(rule.from, c.d, OWNER_Y);
+    if (c.kind === 'coming') {
+      const [l, r] = LANE_EDGES[c.lane];
+      const near = 1 - Math.min(1, c.d / CHARGE_START_PX);
+      this.lungeMark.fillStyle(0xff1744, 0.12 + 0.28 * near + 0.08 * Math.sin(now / 50)).fillRect(l, 0, r - l, HEIGHT);
+      this.lungeMark.lineStyle(4, 0xff1744, 0.9).strokeRect(l + 2, 0, r - l - 4, HEIGHT);
+    }
+    const swoop = rule.from === 'ahead' ? 1 + 0.8 * (1 - Math.min(1, Math.abs(c.d) / CHARGE_START_PX)) : 1;
+    // From behind there is little screen below the owner, so it peeks in at the bottom edge until it is close.
+    const shown = rule.from === 'behind' ? Math.min(y, HEIGHT - 30) : Math.max(y, 20);
+    this.chargerSprite.setPosition(LANE_X[c.lane], shown).setScale(ART_SCALE * 1.2 * swoop);
   }
 
   private drawChaser(now: number, dt: number): void {
@@ -449,26 +462,14 @@ export class WorldHazards {
   private drawZones(now: number): void {
     const g = this.ground.clear();
     for (const z of this.zones) {
+      // A zebra crossing, with its light at the roadside: red stops the dog.
       const h = z.bottom - z.top;
-      if (z.kind === 'ice') {
-        g.fillStyle(0xb3e5fc, 0.75).fillRoundedRect(4, z.top, WIDTH - 8, h, 18);
-        g.lineStyle(3, 0x81d4fa, 1).strokeRoundedRect(4, z.top, WIDTH - 8, h, 18);
-        g.lineStyle(3, 0xffffff, 0.8);
-        for (let y = z.top + 30; y < z.bottom - 20; y += 70) g.lineBetween(30, y + 24, 70, y).lineBetween(220, y + 50, 250, y + 30);
-      } else if (z.kind === 'slope') {
-        // A grassy slope running downhill towards you, with arrows.
-        g.fillStyle(0x7cb342, 0.55).fillRoundedRect(4, z.top, WIDTH - 8, h, 24);
-        g.lineStyle(4, 0xffffff, 0.75);
-        for (let y = z.top + 40; y < z.bottom - 20; y += 60) for (const x of [80, 180, 280]) g.lineBetween(x - 14, y, x, y + 14).lineBetween(x, y + 14, x + 14, y);
-      } else {
-        // A zebra crossing, with its light at the roadside: red stops the dog.
-        g.fillStyle(0xffffff, 0.9);
-        for (let x = 10; x < WIDTH - 10; x += 34) g.fillRect(x, z.top + 30, 20, h - 60);
-        const red = lightAt(now) === 'red';
-        g.fillStyle(0x263238, 1).fillRoundedRect(WIDTH - 34, z.top + 10, 26, 46, 6);
-        g.fillStyle(red ? 0xff1744 : 0x4a1010, 1).fillCircle(WIDTH - 21, z.top + 22, 8);
-        g.fillStyle(red ? 0x0f3d1a : 0x00e676, 1).fillCircle(WIDTH - 21, z.top + 44, 8);
-      }
+      g.fillStyle(0xffffff, 0.9);
+      for (let x = 10; x < WIDTH - 10; x += 34) g.fillRect(x, z.top + 30, 20, h - 60);
+      const red = lightAt(now) === 'red';
+      g.fillStyle(0x263238, 1).fillRoundedRect(WIDTH - 34, z.top + 10, 26, 46, 6);
+      g.fillStyle(red ? 0xff1744 : 0x4a1010, 1).fillCircle(WIDTH - 21, z.top + 22, 8);
+      g.fillStyle(red ? 0x0f3d1a : 0x00e676, 1).fillCircle(WIDTH - 21, z.top + 44, 8);
     }
   }
 }
